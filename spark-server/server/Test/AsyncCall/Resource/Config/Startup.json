@@ -1,5 +1,5 @@
 {
   "ThreadNum" :  1,
-  "ThreadNum" :  8,
+  //"ThreadNum" :  8,
   "Logger": "../../Test/AsyncCall/"
 }
