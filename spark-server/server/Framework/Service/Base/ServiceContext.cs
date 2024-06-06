@@ -14,6 +14,7 @@ using Newtonsoft.Json.Linq;
 namespace SparkServer.Framework.Service
 {
     delegate void Method(int source, int session, string method, byte[] param);
+    delegate void AsyncMethod(int source, int session, string method, object param);
     delegate void RPCCallback(SSContext context, string method, byte[] param, RPCError error);
     delegate void TimeoutCallback(SSContext context, long currentTime);
 
@@ -58,6 +59,8 @@ namespace SparkServer.Framework.Service
         ServiceResponse = 3,
         Error           = 4,
         Timer           = 5,
+        AsyncServiceRequest  = 6,
+        AsyncServiceResponse = 7,
     }
 
     class Message
@@ -68,6 +71,7 @@ namespace SparkServer.Framework.Service
         public int Destination { get; set; }
         public int RPCSession { get; set; }
         public MessageType Type { get; set; }
+        public object AsyncData { get; set; }
     }
 
     class ServiceContext
@@ -81,8 +85,11 @@ namespace SparkServer.Framework.Service
         protected int m_totalServiceSession = 0;
 
         private Dictionary<string, Method> m_serviceMethods = new Dictionary<string, Method>();
+        private Dictionary<string, AsyncMethod> m_serviceAsyncMethods = new Dictionary<string, AsyncMethod>();
         private Dictionary<int, RPCResponseContext> m_responseCallbacks = new Dictionary<int, RPCResponseContext>();
         private Dictionary<int, TimeoutContext> m_timeoutCallbacks = new Dictionary<int, TimeoutContext>();
+
+        private Dictionary<int, TaskCompletionSource<object>> m_responseTcs = new Dictionary<int, TaskCompletionSource<object>>();
 
         private JObject m_bootConfig;
 
@@ -143,6 +150,16 @@ namespace SparkServer.Framework.Service
                             OnTimer(msg);
                         }
                         break;
+                    case MessageType.AsyncServiceRequest:
+                        {
+                            OnAsyncRequest(msg);
+                        }
+                        break;
+                    case MessageType.AsyncServiceResponse:
+                        {
+                            OnAsyncResponse(msg);
+                        }
+                        break;
                     default: break;
                 }
             }
@@ -171,6 +188,22 @@ namespace SparkServer.Framework.Service
                 DoError(msg.Source, msg.RPCSession, RPCError.MethodNotExist, text);
             }
         }
+        
+        private void OnAsyncRequest(Message msg)
+        {
+            AsyncMethod method = null;
+            bool isExist = m_serviceAsyncMethods.TryGetValue(msg.Method, out method);
+            if (isExist)
+            {
+                method(msg.Source, msg.RPCSession, msg.Method, msg.AsyncData);
+            }
+            else
+            {
+                string text = string.Format("Service:{0} has not method {1}", m_serviceAddress, msg.Method);
+                LoggerHelper.Info(m_serviceAddress, text);
+                DoError(msg.Source, msg.RPCSession, RPCError.MethodNotExist, text);
+            }
+        }
 
         private void OnResponse(Message msg)
         {
@@ -180,6 +213,21 @@ namespace SparkServer.Framework.Service
             {
                 responseCallback.Callback(responseCallback.Context, msg.Method, msg.Data, RPCError.OK);
                 m_responseCallbacks.Remove(msg.RPCSession);
+            }
+            else
+            {
+                LoggerHelper.Info(m_serviceAddress, string.Format("Service:{0} session:{1} has not response", m_serviceAddress, msg.RPCSession));
+            }
+        }
+        
+        private void OnAsyncResponse(Message msg)
+        {
+            TaskCompletionSource<object> tcs = null;
+            bool isExist = m_responseTcs.TryGetValue(msg.RPCSession, out tcs);
+            if (isExist)
+            {
+                m_responseTcs.Remove(msg.RPCSession);
+                tcs.SetResult(msg.AsyncData);
             }
             else
             {
@@ -238,6 +286,20 @@ namespace SparkServer.Framework.Service
             ServiceContext targetService = ServiceSlots.GetInstance().Get(destination);
             targetService.Push(msg);
         }
+        
+        private void PushToService(int destination, string method, object param, MessageType type, int session)
+        {
+            Message msg = new Message();
+            msg.Source = m_serviceAddress;
+            msg.Destination = destination;
+            msg.Method = method;
+            msg.AsyncData = param;
+            msg.RPCSession = session;
+            msg.Type = type;
+
+            ServiceContext targetService = ServiceSlots.GetInstance().Get(destination);
+            targetService.Push(msg);
+        }
 
         protected void Send(int destination, string method, byte[] param)
         {
@@ -272,6 +334,26 @@ namespace SparkServer.Framework.Service
             int serviceId = ServiceSlots.GetInstance().Name2Id(destination);
             Call(serviceId, method, param, context, cb);
         }
+        
+        protected Task<object> AsyncCall(int destination, string method, object param)
+        {
+            if (m_totalServiceSession >= Int32.MaxValue)
+            {
+                m_totalServiceSession = 0;
+            }
+
+            int session = ++m_totalServiceSession;
+            TaskCompletionSource<object> tcs = new TaskCompletionSource<object>();
+            m_responseTcs[session] = tcs;
+            PushToService(destination, method, param, MessageType.AsyncServiceRequest, session);
+            return tcs.Task;
+        }
+        
+        protected Task<object> AsyncCall(string destination, string method, object param)
+        {
+            int serviceId = ServiceSlots.GetInstance().Name2Id(destination);
+            return AsyncCall(serviceId, method, param);
+        }
 
         protected void RemoteSend(string remoteNode, string service, string method, byte[] param)
         {
@@ -304,6 +386,11 @@ namespace SparkServer.Framework.Service
         {
             PushToService(destination, method, param, MessageType.ServiceResponse, session);
         }
+        
+        protected void DoAsyncResponse(int destination, string method, object param, int session)
+        {
+            PushToService(destination, method, param, MessageType.AsyncServiceResponse, session);
+        }
 
         protected void DoError(int destination, int session, RPCError errorCode, string errorText)
         {
@@ -316,6 +403,11 @@ namespace SparkServer.Framework.Service
         protected void RegisterServiceMethods(string methodName, Method method)
         {
             m_serviceMethods.Add(methodName, method);
+        }
+        
+        protected void RegisterServiceAsyncMethods(string methodName, AsyncMethod method)
+        {
+            m_serviceAsyncMethods.Add(methodName, method);
         }
 
         protected void Timeout(SSContext context, long timeout, TimeoutCallback callback)

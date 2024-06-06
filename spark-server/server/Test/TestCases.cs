@@ -24,6 +24,7 @@ namespace SparkServer.Test
             RegisterTestCase("RPCTestServer", RPCTestServer);
             RegisterTestCase("RPCTestClient", RPCTestClient);
             RegisterTestCase("SendSkynetRequest", TestSendSkynetRequest);
+            RegisterTestCase("TestAsyncCall", TestAsyncCall);
         }
 
         public void Run(string caseName)
@@ -98,6 +99,17 @@ namespace SparkServer.Test
             };
             Server server = new Server();
             server.Run("../../Test/SendSkynetRequest/Resource/Config/Startup.json", boot);
+        }
+        
+        private void TestAsyncCall()
+        {
+            BootServices boot = delegate ()
+            {
+                SparkServerUtility.NewService("SparkServer.Test.AsyncCall.AsyncCallService", "AsyncCallServiceA", Encoding.UTF8.GetBytes("AsyncCallServiceB"));
+                SparkServerUtility.NewService("SparkServer.Test.AsyncCall.AsyncCallService", "AsyncCallServiceB", Encoding.UTF8.GetBytes("AsyncCallServiceA"));
+            };
+            Server server = new Server();
+            server.Run("../../Test/AsyncCall/Resource/Config/Startup.json", boot);
         }
     }
 }
