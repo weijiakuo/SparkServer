@@ -105,8 +105,10 @@ namespace SparkServer.Test
         {
             BootServices boot = delegate ()
             {
-                SparkServerUtility.NewService("SparkServer.Test.AsyncCall.AsyncCallService", "AsyncCallServiceA", Encoding.UTF8.GetBytes("AsyncCallServiceB"));
-                SparkServerUtility.NewService("SparkServer.Test.AsyncCall.AsyncCallService", "AsyncCallServiceB", Encoding.UTF8.GetBytes("AsyncCallServiceA"));
+                for (int i = 0; i < 1000; i++)
+                {
+                    SparkServerUtility.NewService("SparkServer.Test.AsyncCall.AsyncCallService", $"AsyncCallService{i}");
+                }
             };
             Server server = new Server();
             server.Run("../../Test/AsyncCall/Resource/Config/Startup.json", boot);

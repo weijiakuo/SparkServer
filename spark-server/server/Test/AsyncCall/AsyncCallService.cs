@@ -1,5 +1,7 @@
 ﻿using System;
+using System.Diagnostics;
 using System.Text;
+using System.Threading;
 using System.Threading.Tasks;
 using SparkServer.Framework.Service;
 using SparkServer.Framework.Utility;
@@ -20,11 +22,8 @@ class AsyncCallService : ServiceContext
         public Int64 useTime;
     }
 
-    private string targetServiceName = "";
-    
-    protected override void Init(byte[] param)
+    protected override void Init()
     {
-        targetServiceName = Encoding.UTF8.GetString(param);
         base.Init();
         RegisterServiceAsyncMethods("OnAsyncCall", OnAsyncCall);
         this.TestSendMsg();
@@ -50,11 +49,12 @@ class AsyncCallService : ServiceContext
             text = "Hello World.",
             time = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
         };
-        Task<object> tRsp = AsyncCall(targetServiceName, "OnAsyncCall", req);
+        Random random = new System.Random();
+        Task<object> tRsp = AsyncCall($"AsyncCallService{random.Next(0, 1000)}", "OnAsyncCall", req);
         Rsp rsp = await tRsp as Rsp;
-        LoggerHelper.Info(m_serviceAddress, string.Format($"<<<<<<<<<<<<<<<<<<<<Response Receive Use Time: {rsp.useTime} info: {req.text}"));
+        LoggerHelper.Info(m_serviceAddress, string.Format($"<<<<<<<<<<<<<<<<<<<<Response Receive Use Time: {rsp.useTime} info: {rsp.text}"));
         Int64 totalUseTime = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() - req.time;
-        LoggerHelper.Info(m_serviceAddress, string.Format($"<<<<<<<<<<<<<<<<<<<<Response Receive Total UseTime: {totalUseTime} info: {req.text}"));
+        LoggerHelper.Info(m_serviceAddress, string.Format($"<<<<<<<<<<<<<<<<<<<<Response Receive Total UseTime: {totalUseTime} info: {rsp.text}"));
     }
 
     private void TestSendMsg()
